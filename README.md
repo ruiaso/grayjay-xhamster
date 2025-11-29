@@ -1,3 +1,5 @@
+Doesn't work if anyone can help fix the code or just make their own please do
+
 # XHamster Plugin for GrayJay
 
 Xhamster porn site
