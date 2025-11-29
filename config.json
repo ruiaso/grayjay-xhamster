@@ -1,0 +1,68 @@
+{
+  "name": "XHamster",
+  "platformUrl": "https://xhamster.com",
+  "description": "Xhamster porn site",
+  "author": "aqusizo",
+  "authorUrl": "",
+  "sourceUrl": "https://github.com/ruiaso/grayjay-xhamster/releases/latest/download/config.json",
+  "scriptUrl": "./script.js",
+  "repositoryUrl": "https://github.com/ruiaso/grayjay-xhamster",
+  "version": 1,
+  "iconUrl": "https://static-ah.xhcdn.com/xh-desktop/images/favicon/favicon-256x256.ico?v=1",
+  "id": "b9824d60-0f52-425c-97fe-55894f2bbdbc",
+  "scriptSignature": "",
+  "scriptPublicKey": "",
+  "packages": [
+    "Http",
+    "DOMParser"
+  ],
+  "allowEval": false,
+  "allowAllHttpHeaderAccess": false,
+  "allowUrls": [
+    "xhamster.com",
+    ".xhamster.com"
+  ],
+  "supportedClaimTypes": [
+    27
+  ],
+  "settings": [
+    {
+      "variable": "baseUrl",
+      "name": "API Server",
+      "description": "API server endpoint",
+      "type": "Dropdown",
+      "default": "https://xhamster.com",
+      "options": [
+        "https://xhamster.com"
+      ]
+    },
+    {
+      "variable": "enableDebugLogging",
+      "name": "Enable Debug Logging",
+      "description": "Enable detailed logging for debugging purposes",
+      "type": "Boolean",
+      "default": "false"
+    }
+  ],
+  "changelog": {
+    "1": [
+      "Initial release"
+    ]
+  },
+  "constants": {
+    "defaultHeaders": {}
+  },
+  "_tags": [
+    "video",
+    "adult",
+    "nsfw",
+    "explicit",
+    "search",
+    "playlist"
+  ],
+  "_nsfw": true,
+  "_feeds": {
+    "commits": "https://github.com/YourUsername/grayjay-xhamster/commits/main.atom",
+    "releases": "https://github.com/ruiaso/grayjay-xhamster/releases.atom "
+  }
+}
