@@ -1,4 +1,4 @@
-Basic Spankbang Plugin for Grayjay the app
+Basic Xhamster Plugin for Grayjay the app
 
 Basic Workflow working fine
 
@@ -7,7 +7,7 @@ Try it
 GrayJay -> Sources -> +
 And scan this QR code
 
-![qr-code (1)](https://raw.githubusercontent.com/ruiaso/spankbang-grayjay-plugin/refs/heads/main/assets/SBQR.png)
+![qr-code (1)](https://raw.githubusercontent.com/ruiaso/grayjay-xhamster/refs/heads/main/assets/XH.png)
 
 What's working:
 
