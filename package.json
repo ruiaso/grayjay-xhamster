@@ -1,0 +1,13 @@
+{
+  "name": "spankbang-grayjay-plugin",
+  "version": "1.0.0",
+  "description": "SpankBang plugin for Grayjay - static file server",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "keywords": ["grayjay", "plugin", "spankbang"],
+  "author": "GreyPluginDev",
+  "license": "MIT",
+  "dependencies": {}
+}
