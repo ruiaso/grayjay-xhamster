@@ -1,16 +1,14 @@
 Basic Xhamster Plugin for Grayjay the app
 
-Basic Workflow working fine
-
+Basic Workflow not working
 Try it
 
 GrayJay -> Sources -> +
 And scan this QR code
 
 ![qr-code (1)](https://raw.githubusercontent.com/ruiaso/grayjay-xhamster/refs/heads/main/assets/XH.png)
-
+Broken framework at the moment Below is n/a
 What's working:
-
 
     Video download (HLS)
     Video search
