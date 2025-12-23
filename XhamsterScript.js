@@ -304,10 +304,22 @@ function createPlatformVideo(videoData) {
 function createVideoSources(videoData) {
     const videoSources = [];
 
+    // Add HLS first (highest priority for playback)
+    if (videoData.sources && (videoData.sources.hls || videoData.sources.m3u8)) {
+        const hlsUrl = videoData.sources.hls || videoData.sources.m3u8;
+        if (hlsUrl && hlsUrl.startsWith('http')) {
+            videoSources.push(new HLSSource({
+                url: hlsUrl,
+                name: "HLS (Adaptive)",
+                priority: true
+            }));
+        }
+    }
+
     const qualityOrder = ['2160', '1080', '720', '480', '240'];
 
     for (const quality of qualityOrder) {
-        if (videoData.sources && videoData.sources[quality]) {
+        if (videoData.sources && videoData.sources[quality] && videoData.sources[quality].startsWith('http')) {
             const config = CONFIG.VIDEO_QUALITIES[quality] || { width: 854, height: 480 };
             videoSources.push(new VideoUrlSource({
                 url: videoData.sources[quality],
@@ -335,15 +347,6 @@ function createVideoSources(videoData) {
                 }));
             }
         }
-    }
-
-    if (videoData.sources && (videoData.sources.hls || videoData.sources.m3u8)) {
-        const hlsUrl = videoData.sources.hls || videoData.sources.m3u8;
-        videoSources.push(new HLSSource({
-            url: hlsUrl,
-            name: "HLS (Adaptive)",
-            priority: true
-        }));
     }
 
     if (videoSources.length === 0) {
@@ -974,13 +977,18 @@ source.getHome = function() {
 };
 
 function getHomeResults(page) {
-    const url = page > 1 ? `${BASE_URL}/${page}` : BASE_URL;
+    let url;
+    if (page === 1) {
+        url = `${BASE_URL}/videos/newest/`;
+    } else {
+        url = `${BASE_URL}/videos/newest/?page=${page}`;
+    }
     log("Fetching home page: " + url);
     
     try {
         const html = makeRequest(url, API_HEADERS, 'home page');
         const videos = parseSearchResults(html);
-        return videos.map(v => createPlatformVideo(v));
+        return videos.length > 0 ? videos : [];
     } catch (error) {
         log("Home page error: " + error.message);
         if (page > 1) {
@@ -1213,6 +1221,53 @@ source.getUserPlaylists = function() {
 
 source.getPlaylist = function(url) {
     throw new ScriptException("Playlists not implemented");
+};
+
+source.canDownload = function(video) {
+    return true;
+};
+
+source.getDownloadables = function(video) {
+    try {
+        const url = video.url.value || video.url;
+        const html = makeRequest(url, API_HEADERS, 'video download');
+        const videoData = parseVideoPage(html);
+        
+        const downloads = [];
+        
+        if (videoData.sources) {
+            const qualityOrder = ['2160', '1080', '720', '480', '240'];
+            for (const quality of qualityOrder) {
+                if (videoData.sources[quality] && videoData.sources[quality].startsWith('http')) {
+                    const name = quality + "p";
+                    downloads.push(new Downloadable({
+                        name: name,
+                        url: videoData.sources[quality],
+                        mimeType: "video/mp4"
+                    }));
+                }
+            }
+        }
+        
+        if (videoData.sources && (videoData.sources.hls || videoData.sources.m3u8)) {
+            const hlsUrl = videoData.sources.hls || videoData.sources.m3u8;
+            downloads.push(new Downloadable({
+                name: "HLS Stream",
+                url: hlsUrl,
+                mimeType: "application/x-mpegURL"
+            }));
+        }
+        
+        if (downloads.length === 0) {
+            log("No downloads available for video: " + url);
+            return [];
+        }
+        
+        return downloads;
+    } catch (error) {
+        log("Failed to get downloadables: " + error.message);
+        return [];
+    }
 };
 
 log("xHamster plugin loaded");
