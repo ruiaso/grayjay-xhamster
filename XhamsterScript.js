@@ -974,13 +974,20 @@ source.getHome = function() {
 };
 
 function getHomeResults(page) {
-    const url = page > 1 ? `${BASE_URL}/?page=${page}` : BASE_URL;
+    const url = page > 1 ? `${BASE_URL}/${page}` : BASE_URL;
     log("Fetching home page: " + url);
     
-    const html = makeRequest(url, API_HEADERS, 'home page');
-    const videos = parseSearchResults(html);
-    
-    return videos.map(v => createPlatformVideo(v));
+    try {
+        const html = makeRequest(url, API_HEADERS, 'home page');
+        const videos = parseSearchResults(html);
+        return videos.map(v => createPlatformVideo(v));
+    } catch (error) {
+        log("Home page error: " + error.message);
+        if (page > 1) {
+            return [];
+        }
+        throw error;
+    }
 }
 
 source.getHomePager = function(context) {
