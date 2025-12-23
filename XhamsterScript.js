@@ -88,6 +88,31 @@ function makeRequestNoThrow(url, headers = null, context = 'request') {
     }
 }
 
+// Extract window.initials JSON data from xHamster pages
+function extractWindowInitials(html) {
+    try {
+        // Find the script tag with window.initials data
+        const match = html.match(/<script[^>]*id="initials-script"[^>]*>([\s\S]*?)<\/script>/i);
+        if (!match || !match[1]) {
+            return null;
+        }
+        
+        const scriptContent = match[1];
+        // Extract the JSON object from "window.initials={...}"
+        const jsonMatch = scriptContent.match(/window\.initials\s*=\s*(\{[\s\S]*?\});/);
+        if (!jsonMatch || !jsonMatch[1]) {
+            return null;
+        }
+        
+        const jsonStr = jsonMatch[1];
+        // Parse the JSON - handle escaped characters
+        const data = JSON.parse(jsonStr);
+        return data;
+    } catch (error) {
+        return null;
+    }
+}
+
 function extractVideoId(url) {
     if (!url || typeof url !== 'string') {
         throw new ScriptException("Invalid URL provided for video ID extraction");
@@ -532,52 +557,76 @@ function parseVideoPage(html) {
         }
     }
 
-    const uploaderPatterns = [
-        /<a[^>]*class="[^"]*video-uploader__name[^"]*"[^>]*href="\/channels\/([^"\/]+)"[^>]*>([^<]+)<\/a>/i,
-        /<a[^>]*class="[^"]*video-uploader__name[^"]*"[^>]*href="\/users\/([^"\/]+)"[^>]*>([^<]+)<\/a>/i,
-        /<a[^>]*class="[^"]*video-uploader__name[^"]*"[^>]*href="\/pornstars\/([^"\/]+)"[^>]*>([^<]+)<\/a>/i,
-        /<a[^>]*href="\/channels\/([^"\/]+)"[^>]*>[\s\S]*?(?:<img[^>]*(?:data-src|src)="([^"]+)")?[\s\S]*?([^<]+)<\/a>/i,
-        /<a[^>]*href="\/users\/([^"\/]+)"[^>]*class="[^"]*user[^"]*"[^>]*>[\s\S]*?(?:<img[^>]*src="([^"]+)")?[\s\S]*?([^<]+)<\/a>/i,
-        /<a[^>]*href="\/pornstars\/([^"\/]+)"[^>]*>[\s\S]*?(?:<img[^>]*src="([^"]+)")?[\s\S]*?<span[^>]*>([^<]+)<\/span>/i,
-        /<a[^>]*class="[^"]*uploader[^"]*"[^>]*href="([^"]+)"[^>]*>([^<]+)<\/a>/i,
-        /"author"\s*:\s*\{[^}]*"name"\s*:\s*"([^"]+)"[^}]*"url"\s*:\s*"([^"]+)"/
-    ];
-
-    for (const pattern of uploaderPatterns) {
-        const match = html.match(pattern);
-        if (match) {
-            if (pattern.source.includes('author')) {
-                videoData.uploader.name = match[1] || "";
-                videoData.uploader.url = match[2] || "";
-            } else if (pattern.source.includes('video-uploader__name')) {
-                // Handle new xHamster markup with 2 capture groups
-                if (match[0].includes('/channels/')) {
-                    videoData.uploader.name = (match[2] || "").trim();
-                    videoData.uploader.url = `xhamster://channel/${match[1]}`;
-                } else if (match[0].includes('/users/')) {
-                    videoData.uploader.name = (match[2] || "").trim();
-                    videoData.uploader.url = `xhamster://profile/${match[1]}`;
-                } else if (match[0].includes('/pornstars/')) {
-                    videoData.uploader.name = (match[2] || "").trim();
-                    videoData.uploader.url = `xhamster://profile/pornstar:${match[1]}`;
-                }
-            } else if (match[0].includes('/channels/')) {
-                videoData.uploader.name = (match[3] || match[1] || "").trim();
-                videoData.uploader.url = `xhamster://channel/${match[1]}`;
-                videoData.uploader.avatar = match[2] || "";
-            } else if (match[0].includes('/users/')) {
-                videoData.uploader.name = (match[3] || match[1] || "").trim();
-                videoData.uploader.url = `xhamster://profile/${match[1]}`;
-                videoData.uploader.avatar = match[2] || "";
-            } else if (match[0].includes('/pornstars/')) {
-                videoData.uploader.name = (match[3] || match[1] || "").trim();
-                videoData.uploader.url = `xhamster://profile/pornstar:${match[1]}`;
-                videoData.uploader.avatar = match[2] || "";
-            } else {
-                videoData.uploader.name = (match[2] || "").trim();
-                videoData.uploader.url = match[1] || "";
+    // First try to extract uploader from window.initials JSON (new xHamster structure)
+    const initials = extractWindowInitials(html);
+    if (initials && initials.videoModel) {
+        const vm = initials.videoModel;
+        if (vm.channels && vm.channels.length > 0) {
+            const channel = vm.channels[0];
+            videoData.uploader.name = channel.name || "";
+            videoData.uploader.url = `xhamster://channel/${channel.id}`;
+            if (channel.thumb) {
+                videoData.uploader.avatar = channel.thumb;
             }
-            if (videoData.uploader.name) break;
+        } else if (vm.users && vm.users.length > 0) {
+            const user = vm.users[0];
+            videoData.uploader.name = user.name || "";
+            videoData.uploader.url = `xhamster://profile/${user.id}`;
+            if (user.thumb) {
+                videoData.uploader.avatar = user.thumb;
+            }
+        }
+    }
+    
+    // Fallback to HTML parsing if JSON extraction failed
+    if (!videoData.uploader.name) {
+        const uploaderPatterns = [
+            /<a[^>]*class="[^"]*video-uploader__name[^"]*"[^>]*href="\/channels\/([^"\/]+)"[^>]*>([^<]+)<\/a>/i,
+            /<a[^>]*class="[^"]*video-uploader__name[^"]*"[^>]*href="\/users\/([^"\/]+)"[^>]*>([^<]+)<\/a>/i,
+            /<a[^>]*class="[^"]*video-uploader__name[^"]*"[^>]*href="\/pornstars\/([^"\/]+)"[^>]*>([^<]+)<\/a>/i,
+            /<a[^>]*href="\/channels\/([^"\/]+)"[^>]*>[\s\S]*?(?:<img[^>]*(?:data-src|src)="([^"]+)")?[\s\S]*?([^<]+)<\/a>/i,
+            /<a[^>]*href="\/users\/([^"\/]+)"[^>]*class="[^"]*user[^"]*"[^>]*>[\s\S]*?(?:<img[^>]*src="([^"]+)")?[\s\S]*?([^<]+)<\/a>/i,
+            /<a[^>]*href="\/pornstars\/([^"\/]+)"[^>]*>[\s\S]*?(?:<img[^>]*src="([^"]+)")?[\s\S]*?<span[^>]*>([^<]+)<\/span>/i,
+            /<a[^>]*class="[^"]*uploader[^"]*"[^>]*href="([^"]+)"[^>]*>([^<]+)<\/a>/i,
+            /"author"\s*:\s*\{[^}]*"name"\s*:\s*"([^"]+)"[^}]*"url"\s*:\s*"([^"]+)"/
+        ];
+
+        for (const pattern of uploaderPatterns) {
+            const match = html.match(pattern);
+            if (match) {
+                if (pattern.source.includes('author')) {
+                    videoData.uploader.name = match[1] || "";
+                    videoData.uploader.url = match[2] || "";
+                } else if (pattern.source.includes('video-uploader__name')) {
+                    // Handle new xHamster markup with 2 capture groups
+                    if (match[0].includes('/channels/')) {
+                        videoData.uploader.name = (match[2] || "").trim();
+                        videoData.uploader.url = `xhamster://channel/${match[1]}`;
+                    } else if (match[0].includes('/users/')) {
+                        videoData.uploader.name = (match[2] || "").trim();
+                        videoData.uploader.url = `xhamster://profile/${match[1]}`;
+                    } else if (match[0].includes('/pornstars/')) {
+                        videoData.uploader.name = (match[2] || "").trim();
+                        videoData.uploader.url = `xhamster://profile/pornstar:${match[1]}`;
+                    }
+                } else if (match[0].includes('/channels/')) {
+                    videoData.uploader.name = (match[3] || match[1] || "").trim();
+                    videoData.uploader.url = `xhamster://channel/${match[1]}`;
+                    videoData.uploader.avatar = match[2] || "";
+                } else if (match[0].includes('/users/')) {
+                    videoData.uploader.name = (match[3] || match[1] || "").trim();
+                    videoData.uploader.url = `xhamster://profile/${match[1]}`;
+                    videoData.uploader.avatar = match[2] || "";
+                } else if (match[0].includes('/pornstars/')) {
+                    videoData.uploader.name = (match[3] || match[1] || "").trim();
+                    videoData.uploader.url = `xhamster://profile/pornstar:${match[1]}`;
+                    videoData.uploader.avatar = match[2] || "";
+                } else {
+                    videoData.uploader.name = (match[2] || "").trim();
+                    videoData.uploader.url = match[1] || "";
+                }
+                if (videoData.uploader.name) break;
+            }
         }
     }
 
