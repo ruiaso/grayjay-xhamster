@@ -977,32 +977,16 @@ source.getHome = function() {
 };
 
 function getHomeResults(page) {
-    // Use popular videos as home feed - more reliable than homepage
-    let url;
-    if (page === 1) {
-        url = `${BASE_URL}/videos/popular`;
-    } else {
-        url = `${BASE_URL}/videos/popular/?page=${page}`;
-    }
+    // Parse the homepage directly - most reliable
+    let url = BASE_URL + "/";
     log("Fetching home page: " + url);
     
     try {
         const html = makeRequest(url, API_HEADERS, 'home page');
         const videos = parseSearchResults(html);
-        
-        // If no videos found, try recent instead
-        if (videos.length === 0 && page === 1) {
-            const recentUrl = `${BASE_URL}/videos/recent`;
-            const recentHtml = makeRequest(recentUrl, API_HEADERS, 'home page fallback');
-            return parseSearchResults(recentHtml).map(v => createPlatformVideo(v));
-        }
-        
         return videos.map(v => createPlatformVideo(v));
     } catch (error) {
         log("Home page error: " + error.message);
-        if (page > 1) {
-            return [];
-        }
         throw error;
     }
 }
