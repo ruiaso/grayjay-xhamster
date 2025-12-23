@@ -1,6 +1,6 @@
 Basic Xhamster Plugin for Grayjay the app
 
-Basic Workflow not working
+Basic Workflow working
 Try it
 
 GrayJay -> Sources -> +
@@ -14,20 +14,19 @@ What's working:
     Video search
     Video playback
     Video info
-    View profiles for models, pornstars, and channels
     Channel info fetch (description, about, its videos)
+    Video quality selection
+
+What's not working: 
+    Fetching video comments with like/dislike, avatar, etc. (only non-nested ones)
+    View profiles for models, pornstars, and channels
+    Search filters
+    Profile Banners
+    Per-channel video search  
     Channel subscribe/unsubscribe
     Profile Search
     Channel names on video thumbnails
     Reccommended videos
-    Video quality selection
-    Fetching video comments with like/dislike, avatar, etc. (only non-nested ones)
-    Search filters
-    Profile Banners
-    Per-channel video search
-
-What's not working: 
-   
     Channel name's profile picture on videos
     Playlist search
     Channels search
