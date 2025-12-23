@@ -42,6 +42,7 @@ const REGEX_PATTERNS = {
         videoAlt: /^https?:\/\/(?:www\.)?xhamster[0-9]*\.com\/videos\/([^\/\?]+)$/,
         channelUser: /^https?:\/\/(?:www\.)?xhamster[0-9]*\.com\/users\/([^\/\?]+)/,
         channelCreator: /^https?:\/\/(?:www\.)?xhamster[0-9]*\.com\/creators\/([^\/\?]+)/,
+        channelChannel: /^https?:\/\/(?:www\.)?xhamster[0-9]*\.com\/channels\/([^\/\?]+)/,
         pornstar: /^https?:\/\/(?:www\.)?xhamster[0-9]*\.com\/pornstars\/([^\/\?]+)/,
         channelInternal: /^xhamster:\/\/channel\/(.+)$/,
         profileInternal: /^xhamster:\/\/profile\/(.+)$/
@@ -132,7 +133,12 @@ function extractChannelId(url) {
         return { type: 'user', id: profileInternalMatch[1] };
     }
 
-    // Handle direct URLs
+    // Handle direct URLs - check in this order
+    const channelMatch = url.match(/\/channels\/([^\/\?]+)/);
+    if (channelMatch && channelMatch[1]) {
+        return { type: 'channel', id: channelMatch[1].replace(/\/$/, '') };
+    }
+
     const pornstarMatch = url.match(/\/pornstars\/([^\/\?]+)/);
     if (pornstarMatch && pornstarMatch[1]) {
         return { type: 'pornstar', id: pornstarMatch[1].replace(/\/$/, '') };
@@ -697,7 +703,11 @@ function parseRelatedVideos(html) {
     const relatedVideos = [];
     const seenIds = new Set();
 
+    // More aggressive pattern to find related/recommended videos section
     const relatedSectionPatterns = [
+        /<(?:div|section)[^>]*(?:data-section="related"|class="[^"]*related[^"]*")[^>]*>([\s\S]*?)(?:<\/div>|<\/section>)/i,
+        /Related Videos[\s\S]*?<(?:div|section)[^>]*>([\s\S]{0,10000}?)(?:<\/div>|<\/section>)/i,
+        /Recommended[\s\S]*?<(?:div|section)[^>]*>([\s\S]{0,10000}?)(?:<\/div>|<\/section>)/i,
         /<div[^>]*class="[^"]*(?:related|recommendation)[^"]*"[^>]*>([\s\S]*?)(?:<\/div>|<\/section>)/i,
         /<section[^>]*class="[^"]*(?:related|recommendation)[^"]*"[^>]*>([\s\S]*?)<\/section>/i,
         /<div[^>]*id="[^"]*related[^"]*"[^>]*>([\s\S]*?)<\/div>/i
@@ -712,6 +722,7 @@ function parseRelatedVideos(html) {
         }
     }
 
+    // Extract all video links from section with multiple patterns
     const linkPatterns = [
         /href="([^"]*\/videos\/[^"]+)"[^>]*(?:title|alt)="([^"]+)"/gi,
         /<a[^>]*href="([^"]*\/videos\/[^"]+)"[^>]*>[\s\S]*?<(?:h\d|span)[^>]*>([^<]+)</gi,
@@ -720,7 +731,7 @@ function parseRelatedVideos(html) {
     
     for (const linkPattern of linkPatterns) {
         let match;
-        while ((match = linkPattern.exec(sectionHtml)) !== null && relatedVideos.length < 30) {
+        while ((match = linkPattern.exec(sectionHtml)) !== null && relatedVideos.length < 50) {
             const videoUrl = match[1].startsWith('http') ? match[1] : BASE_URL + match[1];
             const idMatch = videoUrl.match(/-(\d+)$/) || videoUrl.match(/\/videos\/([^\/-]+)/);
             const videoId = idMatch ? idMatch[1] : generateVideoId();
@@ -742,10 +753,11 @@ function parseRelatedVideos(html) {
         if (relatedVideos.length > 0) break;
     }
     
+    // Fallback: search entire page for video links
     if (relatedVideos.length === 0) {
         const allLinksPattern = /href="([^"]*\/videos\/[^"]+)"[^>]*(?:title|alt)="([^"]+)"/gi;
         let match;
-        while ((match = allLinksPattern.exec(html)) !== null && relatedVideos.length < 30) {
+        while ((match = allLinksPattern.exec(html)) !== null && relatedVideos.length < 50) {
             const videoUrl = match[1].startsWith('http') ? match[1] : BASE_URL + match[1];
             const idMatch = videoUrl.match(/-(\d+)$/) || videoUrl.match(/\/videos\/([^\/-]+)/);
             const videoId = idMatch ? idMatch[1] : generateVideoId();
@@ -1031,7 +1043,7 @@ source.getContentRecommendations = function(url) {
 
 source.isChannelUrl = function(url) {
     return url.includes('/users/') || url.includes('/pornstars/') || url.includes('/creators/') ||
-           url.includes('xhamster://profile/') || url.includes('xhamster://channel/');
+           url.includes('/channels/') || url.includes('xhamster://profile/') || url.includes('xhamster://channel/');
 };
 
 source.getChannel = function(url) {
@@ -1047,6 +1059,8 @@ source.getChannel = function(url) {
             channelUrl = `${BASE_URL}/users/${channelInfo.id}`;
         } else if (channelInfo.type === 'creator') {
             channelUrl = `${BASE_URL}/creators/${channelInfo.id}`;
+        } else if (channelInfo.type === 'channel') {
+            channelUrl = `${BASE_URL}/channels/${channelInfo.id}`;
         }
     }
     
@@ -1083,6 +1097,8 @@ function getChannelVideos(url, page) {
             channelUrl = `${BASE_URL}/users/${channelInfo.id}/videos`;
         } else if (channelInfo.type === 'creator') {
             channelUrl = `${BASE_URL}/creators/${channelInfo.id}/videos`;
+        } else if (channelInfo.type === 'channel') {
+            channelUrl = `${BASE_URL}/channels/${channelInfo.id}/videos`;
         }
     } else if (!url.includes('/videos')) {
         channelUrl = url.replace(/\/$/, '') + '/videos';
