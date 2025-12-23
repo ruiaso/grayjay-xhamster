@@ -533,6 +533,9 @@ function parseVideoPage(html) {
     }
 
     const uploaderPatterns = [
+        /<a[^>]*class="[^"]*video-uploader__name[^"]*"[^>]*href="\/channels\/([^"\/]+)"[^>]*>([^<]+)<\/a>/i,
+        /<a[^>]*class="[^"]*video-uploader__name[^"]*"[^>]*href="\/users\/([^"\/]+)"[^>]*>([^<]+)<\/a>/i,
+        /<a[^>]*class="[^"]*video-uploader__name[^"]*"[^>]*href="\/pornstars\/([^"\/]+)"[^>]*>([^<]+)<\/a>/i,
         /<a[^>]*href="\/channels\/([^"\/]+)"[^>]*>[\s\S]*?(?:<img[^>]*(?:data-src|src)="([^"]+)")?[\s\S]*?([^<]+)<\/a>/i,
         /<a[^>]*href="\/users\/([^"\/]+)"[^>]*class="[^"]*user[^"]*"[^>]*>[\s\S]*?(?:<img[^>]*src="([^"]+)")?[\s\S]*?([^<]+)<\/a>/i,
         /<a[^>]*href="\/pornstars\/([^"\/]+)"[^>]*>[\s\S]*?(?:<img[^>]*src="([^"]+)")?[\s\S]*?<span[^>]*>([^<]+)<\/span>/i,
@@ -546,6 +549,18 @@ function parseVideoPage(html) {
             if (pattern.source.includes('author')) {
                 videoData.uploader.name = match[1] || "";
                 videoData.uploader.url = match[2] || "";
+            } else if (pattern.source.includes('video-uploader__name')) {
+                // Handle new xHamster markup with 2 capture groups
+                if (match[0].includes('/channels/')) {
+                    videoData.uploader.name = (match[2] || "").trim();
+                    videoData.uploader.url = `xhamster://channel/${match[1]}`;
+                } else if (match[0].includes('/users/')) {
+                    videoData.uploader.name = (match[2] || "").trim();
+                    videoData.uploader.url = `xhamster://profile/${match[1]}`;
+                } else if (match[0].includes('/pornstars/')) {
+                    videoData.uploader.name = (match[2] || "").trim();
+                    videoData.uploader.url = `xhamster://profile/pornstar:${match[1]}`;
+                }
             } else if (match[0].includes('/channels/')) {
                 videoData.uploader.name = (match[3] || match[1] || "").trim();
                 videoData.uploader.url = `xhamster://channel/${match[1]}`;
