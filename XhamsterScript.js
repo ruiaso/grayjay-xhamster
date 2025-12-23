@@ -974,7 +974,7 @@ source.getHome = function() {
 };
 
 function getHomeResults(page) {
-    const url = page > 1 ? `${BASE_URL}/?page=${page}` : `${BASE_URL}/videos`;
+    const url = page > 1 ? `${BASE_URL}/?page=${page}` : BASE_URL;
     log("Fetching home page: " + url);
     
     const html = makeRequest(url, API_HEADERS, 'home page');
