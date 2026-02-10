@@ -1021,103 +1021,92 @@ function parseSearchResults(html) {
     const videos = [];
     const seenIds = new Set();
 
-    // Find all video containers/items
-    const containerPatterns = [
-        /<div[^>]*class="[^"]*thumb-list__item[^"]*"[^>]*>([\s\S]*?)<\/div>\s*(?=<div[^>]*class="[^"]*thumb-list__item|$)/gi,
-        /<div[^>]*class="[^"]*video-thumb[^"]*"[^>]*>([\s\S]*?)<\/div>\s*<\/(?:div|li|article)>/gi,
-        /<article[^>]*class="[^"]*video[^"]*"[^>]*>([\s\S]*?)<\/article>/gi,
-        /<li[^>]*class="[^"]*thumb[^"]*"[^>]*>([\s\S]*?)<\/li>/gi
-    ];
+    if (!html || typeof html !== 'string') return videos;
 
-    let containers = [];
-    for (const pattern of containerPatterns) {
-        let match;
-        while ((match = pattern.exec(html)) !== null && containers.length < 100) {
-            containers.push(match[0]);
-        }
-        if (containers.length > 0) break;
-    }
-
-    // If not enough containers found, collect all video links with context
-    if (containers.length < 5) {
-        const allLinksPattern = /href="([^"]*\/videos\/[^"]+)"/gi;
-        let linkMatch;
-        while ((linkMatch = allLinksPattern.exec(html)) !== null) {
-            const url = linkMatch[1];
-            const idx = html.indexOf(linkMatch[0]);
-            if (idx >= 0) {
-                containers.push(html.substring(Math.max(0, idx - 500), Math.min(html.length, idx + 600)));
-            }
+    // APPROACH: Find all data-video-id attributes and extract context around them
+    // This is more reliable than trying to match nested div containers
+    
+    const videoIdPattern = /data-video-id="(\d+)"/g;
+    let idMatch;
+    const videoPositions = [];
+    
+    while ((idMatch = videoIdPattern.exec(html)) !== null) {
+        const videoId = idMatch[1];
+        if (!seenIds.has(videoId)) {
+            seenIds.add(videoId);
+            videoPositions.push({
+                id: videoId,
+                position: idMatch.index
+            });
         }
     }
-
-    // Process containers
-    for (const container of containers) {
+    
+    // For each video ID found, extract a large context window around it
+    for (const { id: videoId, position } of videoPositions) {
         if (videos.length >= 100) break;
-
+        
+        // Extract ~2000 chars around the video ID position to capture all metadata
+        const contextStart = Math.max(0, position - 200);
+        const contextEnd = Math.min(html.length, position + 2000);
+        const context = html.substring(contextStart, contextEnd);
+        
         // Extract video URL
-        const urlMatch = container.match(/href="([^"]*\/videos\/[^"]+)"/);
+        const urlMatch = context.match(/href="([^"]*\/videos\/[^"]+)"/);
         if (!urlMatch) continue;
-
+        
         const videoUrl = urlMatch[1].startsWith('http') ? urlMatch[1] : BASE_URL + urlMatch[1];
-        const idMatch = videoUrl.match(/-(\d+)$/) || videoUrl.match(/\/videos\/([^\/\?-]+)/);
-        const videoId = idMatch ? idMatch[1] : generateVideoId();
-
-        if (seenIds.has(videoId)) continue;
-        seenIds.add(videoId);
-
-        // Extract title
+        
+        // Extract title from title attribute, aria-label, or video-thumb-info__name
         let title = "Unknown";
         const titlePatterns = [
-            /title="([^"]+)"/,
-            /alt="([^"]+)"/,
-            /<a[^>]*class="[^"]*video-thumb-info__name[^"]*"[^>]*>([^<]+)<\/a>/i,
-            /<(?:h\d|span)[^>]*class="[^"]*title[^"]*"[^>]*>([^<]{5,150})<\/(?:h\d|span)>/,
-            /<(?:h\d|span)[^>]*>([^<]{5,150})<\/(?:h\d|span)>/
+            /title="([^"]{5,200})"/,
+            /aria-label="([^"]{5,200})"/,
+            /class="[^"]*video-thumb-info__name[^"]*"[^>]*>([^<]{5,200})</i
         ];
+        
         for (const pattern of titlePatterns) {
-            const titleMatch = container.match(pattern);
-            if (titleMatch && titleMatch[1] && titleMatch[1].length > 3) {
-                title = cleanVideoTitle(titleMatch[1]);
-                if (title !== "Unknown") break;
-            }
-        }
-
-        // Extract thumbnail
-        let thumbnail = "";
-        const thumbPatterns = [
-            /(?:data-src|src)="([^"]*(?:jpg|jpeg|png|webp)[^"]*)"/,
-            /poster="([^"]+)"/
-        ];
-        for (const pattern of thumbPatterns) {
-            const thumbMatch = container.match(pattern);
-            if (thumbMatch && thumbMatch[1] && (thumbMatch[1].includes('.xh') || thumbMatch[1].includes('thumb') || thumbMatch[1].includes('cdn'))) {
-                thumbnail = thumbMatch[1];
-                if (thumbnail.startsWith('//')) thumbnail = 'https:' + thumbnail;
-                if (!thumbnail.startsWith('http')) thumbnail = 'https:' + thumbnail;
+            const titleMatch = context.match(pattern);
+            if (titleMatch && titleMatch[1]) {
+                title = cleanVideoTitle(titleMatch[1].replace(/&quot;/g, '"').replace(/&amp;/g, '&').replace(/&#39;/g, "'"));
                 break;
             }
         }
-
-        // Extract duration
-        let duration = extractBestDurationSecondsFromContext(container);
-
-        // Extract view count
-        let views = extractViewCountFromContext(container);
-
-        // Extract uploader
-        let uploader = extractUploaderFromContext(container);
-
+        
+        // Extract thumbnail
+        let thumbnail = "";
+        const thumbMatch = context.match(/src="(https?:\/\/[^"]+\.(?:jpg|jpeg|png|webp)[^"]*)"/);
+        if (thumbMatch && thumbMatch[1]) {
+            thumbnail = thumbMatch[1];
+        } else {
+            // Try srcset
+            const srcsetMatch = context.match(/srcset="([^"]+)"/);
+            if (srcsetMatch && srcsetMatch[1]) {
+                const firstUrl = srcsetMatch[1].split(',')[0].trim().split(' ')[0];
+                if (firstUrl.match(/\.(jpg|jpeg|png|webp)/)) {
+                    thumbnail = firstUrl.startsWith('http') ? firstUrl : 'https:' + firstUrl;
+                }
+            }
+        }
+        
+        // Extract duration from the context
+        let duration = extractBestDurationSecondsFromContext(context);
+        
+        // Extract view count from the context
+        let views = extractViewCountFromContext(context);
+        
+        // Extract uploader from the context
+        let uploader = extractUploaderFromContext(context);
+        
         // Extract upload date
         let uploadDate = 0;
-        const dateMatch = container.match(/(\d+\s*(?:second|minute|hour|day|week|month|year)s?\s*ago)/i);
+        const dateMatch = context.match(/(\d+\s*(?:second|minute|hour|day|week|month|year)s?\s*ago)/i);
         if (dateMatch) {
             uploadDate = parseRelativeDate(dateMatch[1]);
         }
-
+        
         videos.push({
             id: videoId,
-            title: title || "Unknown",
+            title: title,
             thumbnail: thumbnail,
             duration: duration,
             views: views,
@@ -1125,6 +1114,54 @@ function parseSearchResults(html) {
             url: videoUrl,
             uploader: uploader
         });
+    }
+    
+    // Fallback: if no data-video-id found, try link-based extraction
+    if (videos.length === 0) {
+        const linkPattern = /href="([^"]*\/videos\/[^"]+)"/gi;
+        let linkMatch;
+        
+        while ((linkMatch = linkPattern.exec(html)) !== null && videos.length < 100) {
+            const videoUrl = linkMatch[1].startsWith('http') ? linkMatch[1] : BASE_URL + linkMatch[1];
+            
+            // Extract ID from URL
+            const idMatch = videoUrl.match(/-(\w+)$/) || videoUrl.match(/\/videos\/([^\/\?]+)/);
+            const videoId = idMatch ? idMatch[1] : generateVideoId();
+            
+            if (seenIds.has(videoId)) continue;
+            seenIds.add(videoId);
+            
+            // Get context around the link
+            const contextStart = Math.max(0, linkMatch.index - 500);
+            const contextEnd = Math.min(html.length, linkMatch.index + 1500);
+            const context = html.substring(contextStart, contextEnd);
+            
+            let title = "Unknown";
+            const titleMatch = context.match(/title="([^"]{5,200})"/) || 
+                              context.match(/aria-label="([^"]{5,200})"/);
+            if (titleMatch && titleMatch[1]) {
+                title = cleanVideoTitle(titleMatch[1].replace(/&quot;/g, '"').replace(/&amp;/g, '&'));
+            }
+            
+            let thumbnail = "";
+            const thumbMatch = context.match(/src="(https?:\/\/[^"]+\.(?:jpg|jpeg|png|webp)[^"]*)"/);
+            if (thumbMatch) thumbnail = thumbMatch[1];
+            
+            let duration = extractBestDurationSecondsFromContext(context);
+            let views = extractViewCountFromContext(context);
+            let uploader = extractUploaderFromContext(context);
+            
+            videos.push({
+                id: videoId,
+                title: title,
+                thumbnail: thumbnail,
+                duration: duration,
+                views: views,
+                uploadDate: 0,
+                url: videoUrl,
+                uploader: uploader
+            });
+        }
     }
 
     return videos;
@@ -1136,60 +1173,93 @@ function parseRelatedVideos(html) {
 
     if (!html || typeof html !== 'string') return relatedVideos;
 
-    // xHamster uses .thumb-list--related class for related videos
-    // Find the related section first
-    let relatedHtml = html;
+    // Find the related/recommended section by looking for thumb-list--related
+    let relatedHtml = "";
     
-    // Try to isolate the related videos section
-    const relatedSectionMatch = html.match(/class="[^"]*thumb-list--related[^"]*"[^>]*>([\s\S]*?)(?:<\/div>\s*<div[^>]*class="[^"]*container|<script|$)/i);
-    if (relatedSectionMatch && relatedSectionMatch[0]) {
-        relatedHtml = relatedSectionMatch[0];
+    // Find index of related section
+    const relatedClassIdx = html.indexOf('thumb-list--related');
+    if (relatedClassIdx > 0) {
+        // Extract a large chunk starting from there
+        relatedHtml = html.substring(relatedClassIdx, Math.min(html.length, relatedClassIdx + 50000));
+    } else {
+        // Try finding by "related" text
+        const relatedIdx = html.toLowerCase().indexOf('related');
+        if (relatedIdx > 0) {
+            relatedHtml = html.substring(relatedIdx);
+        } else {
+            relatedHtml = html;
+        }
     }
-
-    // Find all thumb-list__item containers with data-role="related-item"
-    // Pattern from console: <div class="thumb-list__item video-thumb video-thumb--type-video page-1" data-role="related-item" ...>
-    const containerRegex = /<div[^>]*class="thumb-list__item[^"]*video-thumb[^"]*"[^>]*data-role="related-item"[^>]*>([\s\S]*?)(?=<div[^>]*class="thumb-list__item|<\/div>\s*<\/div>\s*<div[^>]*class="container|$)/gi;
     
-    let match;
-    while ((match = containerRegex.exec(relatedHtml)) !== null && relatedVideos.length < 30) {
-        const container = match[0];
+    // Find all video IDs with data-role="related-item" in the related section
+    const relatedItemPattern = /data-role="related-item"[^>]*data-[^>]*data-video-id="(\d+)"|data-video-id="(\d+)"[^>]*data-role="related-item"/gi;
+    let idMatch;
+    const videoPositions = [];
+    
+    while ((idMatch = relatedItemPattern.exec(relatedHtml)) !== null) {
+        const videoId = idMatch[1] || idMatch[2];
+        if (videoId && !seenIds.has(videoId)) {
+            seenIds.add(videoId);
+            videoPositions.push({
+                id: videoId,
+                position: idMatch.index
+            });
+        }
+    }
+    
+    // If no related-item found, try just finding data-video-id in the related section
+    if (videoPositions.length === 0) {
+        const simpleIdPattern = /data-video-id="(\d+)"/g;
+        while ((idMatch = simpleIdPattern.exec(relatedHtml)) !== null && videoPositions.length < 30) {
+            const videoId = idMatch[1];
+            if (!seenIds.has(videoId)) {
+                seenIds.add(videoId);
+                videoPositions.push({
+                    id: videoId,
+                    position: idMatch.index
+                });
+            }
+        }
+    }
+    
+    // For each video ID found, extract context and metadata
+    for (const { id: videoId, position } of videoPositions) {
+        if (relatedVideos.length >= 30) break;
         
-        // Extract video ID from data-video-id attribute
-        const videoIdMatch = container.match(/data-video-id="(\d+)"/);
-        const videoId = videoIdMatch ? videoIdMatch[1] : null;
-        
-        if (!videoId || seenIds.has(videoId)) continue;
-        seenIds.add(videoId);
+        // Extract ~2500 chars around the video ID
+        const contextStart = Math.max(0, position - 200);
+        const contextEnd = Math.min(relatedHtml.length, position + 2500);
+        const context = relatedHtml.substring(contextStart, contextEnd);
         
         // Extract video URL
-        const urlMatch = container.match(/href="([^"]*\/videos\/[^"]+)"/);
+        const urlMatch = context.match(/href="([^"]*\/videos\/[^"]+)"/);
         if (!urlMatch) continue;
+        
         const videoUrl = urlMatch[1].startsWith('http') ? urlMatch[1] : BASE_URL + urlMatch[1];
         
-        // Extract title from title attribute or aria-label
+        // Extract title
         let title = "Unknown";
-        const titleMatch = container.match(/title="([^"]+)"/) || 
-                          container.match(/aria-label="([^"]+)"/);
+        const titleMatch = context.match(/title="([^"]{5,200})"/) || 
+                          context.match(/aria-label="([^"]{5,200})"/);
         if (titleMatch && titleMatch[1]) {
-            title = cleanVideoTitle(titleMatch[1].replace(/&quot;/g, '"').replace(/&amp;/g, '&'));
+            title = cleanVideoTitle(titleMatch[1].replace(/&quot;/g, '"').replace(/&amp;/g, '&').replace(/&#39;/g, "'"));
         }
         
-        // Extract thumbnail from src or srcset
+        // Extract thumbnail
         let thumbnail = "";
-        const thumbMatch = container.match(/src="([^"]+\.(?:jpg|jpeg|png|webp)[^"]*)"/);
+        const thumbMatch = context.match(/src="(https?:\/\/[^"]+\.(?:jpg|jpeg|png|webp)[^"]*)"/);
         if (thumbMatch && thumbMatch[1]) {
             thumbnail = thumbMatch[1];
-            if (thumbnail.startsWith('//')) thumbnail = 'https:' + thumbnail;
         }
         
         // Extract duration
-        let duration = extractBestDurationSecondsFromContext(container);
+        let duration = extractBestDurationSecondsFromContext(context);
         
         // Extract views
-        let views = extractViewCountFromContext(container);
+        let views = extractViewCountFromContext(context);
         
         // Extract uploader
-        let uploader = extractUploaderFromContext(container);
+        let uploader = extractUploaderFromContext(context);
         
         relatedVideos.push({
             id: videoId,
@@ -1200,54 +1270,6 @@ function parseRelatedVideos(html) {
             url: videoUrl,
             uploader: uploader
         });
-    }
-    
-    // Fallback: if no containers found with data-role, try simpler approach
-    if (relatedVideos.length === 0) {
-        // Look for any video thumb in related section
-        const simpleContainerRegex = /<div[^>]*class="[^"]*thumb-list__item[^"]*video-thumb[^"]*"[^>]*>([\s\S]*?)(?=<div[^>]*class="[^"]*thumb-list__item|$)/gi;
-        
-        while ((match = simpleContainerRegex.exec(relatedHtml)) !== null && relatedVideos.length < 30) {
-            const container = match[0];
-            
-            const videoIdMatch = container.match(/data-video-id="(\d+)"/);
-            const videoId = videoIdMatch ? videoIdMatch[1] : generateVideoId();
-            
-            if (seenIds.has(videoId)) continue;
-            seenIds.add(videoId);
-            
-            const urlMatch = container.match(/href="([^"]*\/videos\/[^"]+)"/);
-            if (!urlMatch) continue;
-            const videoUrl = urlMatch[1].startsWith('http') ? urlMatch[1] : BASE_URL + urlMatch[1];
-            
-            let title = "Unknown";
-            const titleMatch = container.match(/title="([^"]+)"/) || 
-                              container.match(/aria-label="([^"]+)"/);
-            if (titleMatch && titleMatch[1]) {
-                title = cleanVideoTitle(titleMatch[1].replace(/&quot;/g, '"').replace(/&amp;/g, '&'));
-            }
-            
-            let thumbnail = "";
-            const thumbMatch = container.match(/src="([^"]+\.(?:jpg|jpeg|png|webp)[^"]*)"/);
-            if (thumbMatch && thumbMatch[1]) {
-                thumbnail = thumbMatch[1];
-                if (thumbnail.startsWith('//')) thumbnail = 'https:' + thumbnail;
-            }
-            
-            let duration = extractBestDurationSecondsFromContext(container);
-            let views = extractViewCountFromContext(container);
-            let uploader = extractUploaderFromContext(container);
-            
-            relatedVideos.push({
-                id: videoId,
-                title: title,
-                thumbnail: thumbnail,
-                duration: duration,
-                views: views,
-                url: videoUrl,
-                uploader: uploader
-            });
-        }
     }
 
     return relatedVideos;
@@ -2572,4 +2594,4 @@ class XHamsterHistoryPager extends VideoPager {
     }
 }
 
-log("xHamster plugin loaded - v4");
+log("xHamster plugin loaded - v5");
