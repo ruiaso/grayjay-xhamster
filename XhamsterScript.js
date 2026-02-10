@@ -419,6 +419,36 @@ function extractAllDurationCandidatesFromContext(html, opts = {}) {
 
     const candidates = [];
 
+    // xHamster specific: <div data-role="video-duration"><div class="tiny-8643e invert-8643e">29:22</div></div>
+    const xhDurationPattern = /<div[^>]*data-role="video-duration"[^>]*>[\s\S]*?<div[^>]*class="[^"]*tiny-[^"]*"[^>]*>(\d+:\d+(?::\d+)?)<\/div>/gi;
+    let xhMatch;
+    while ((xhMatch = xhDurationPattern.exec(html)) !== null) {
+        if (xhMatch[1]) {
+            const parsed = parseDuration(xhMatch[1].trim());
+            if (parsed > 0 && parsed <= options.maxSeconds) candidates.push(parsed);
+        }
+    }
+
+    // Alternative xHamster pattern - just the tiny class with time
+    const tinyPattern = /<div[^>]*class="[^"]*tiny-[^"]*"[^>]*>(\d+:\d+(?::\d+)?)<\/div>/gi;
+    let tinyMatch;
+    while ((tinyMatch = tinyPattern.exec(html)) !== null) {
+        if (tinyMatch[1]) {
+            const parsed = parseDuration(tinyMatch[1].trim());
+            if (parsed > 0 && parsed <= options.maxSeconds) candidates.push(parsed);
+        }
+    }
+
+    // thumb-image-container__duration pattern
+    const thumbDurationPattern = /<div[^>]*class="[^"]*thumb-image-container__duration[^"]*"[^>]*>[\s\S]*?(\d+:\d+(?::\d+)?)/gi;
+    let thumbMatch;
+    while ((thumbMatch = thumbDurationPattern.exec(html)) !== null) {
+        if (thumbMatch[1]) {
+            const parsed = parseDuration(thumbMatch[1].trim());
+            if (parsed > 0 && parsed <= options.maxSeconds) candidates.push(parsed);
+        }
+    }
+
     // 1) Data attributes (often seconds)
     const dataAttrPatterns = [
         /data-duration=["']([^"']+)["']/gi,
@@ -506,11 +536,18 @@ function extractViewCountFromContext(html) {
     if (!html) return 0;
 
     const patterns = [
-        // xHamster specific patterns
+        // xHamster specific pattern: <div class="video-thumb-views">5.6M views</div>
+        /<div[^>]*class="video-thumb-views"[^>]*>([^<]+)<\/div>/i,
+        /<span[^>]*class="video-thumb-views"[^>]*>([^<]+)<\/span>/i,
+        // With aria-hidden
+        /<div[^>]*class="video-thumb-views"[^>]*aria-hidden="[^"]*"[^>]*>([^<]+)<\/div>/i,
+        // Generic views patterns
         /<span[^>]*class="[^"]*views[^"]*"[^>]*>([^<]+)<\/span>/i,
         /class="[^"]*entity-info-views[^"]*"[^>]*>([^<]+)</i,
+        // Patterns with views word
         /(\d+(?:[,.]\d+)?[KMB]?)\s*views?\b/i,
         /\bviews?\s*:?\s*(\d+(?:[,.]\d+)?[KMB]?)\b/i,
+        // JSON-LD
         /"interactionCount"\s*:\s*"?(\d+)"?/,
         />(\d{1,3}(?:[,.]\d{3})*[KMB]?)\s*views?</i
     ];
@@ -538,53 +575,103 @@ function extractUploaderFromContext(html) {
         avatar: ""
     };
 
-    // xHamster uploader patterns
-    const uploaderPatterns = [
-        // Profile links
-        {
-            pattern: /<a[^>]*href="\/users\/([^"\/]+)"[^>]*class="[^"]*video-uploader__name[^"]*"[^>]*>([^<]+)<\/a>/i,
-            type: 'user'
-        },
-        {
-            pattern: /<a[^>]*class="[^"]*video-uploader__name[^"]*"[^>]*href="\/users\/([^"\/]+)"[^>]*>([^<]+)<\/a>/i,
-            type: 'user'
-        },
-        // Channel links
-        {
-            pattern: /<a[^>]*href="\/channels\/([^"\/]+)"[^>]*class="[^"]*video-uploader__name[^"]*"[^>]*>([^<]+)<\/a>/i,
-            type: 'channel'
-        },
-        {
-            pattern: /<a[^>]*class="[^"]*video-uploader__name[^"]*"[^>]*href="\/channels\/([^"\/]+)"[^>]*>([^<]+)<\/a>/i,
-            type: 'channel'
-        },
-        // Pornstar links
-        {
-            pattern: /<a[^>]*href="\/pornstars\/([^"\/]+)"[^>]*class="[^"]*video-uploader__name[^"]*"[^>]*>([^<]+)<\/a>/i,
-            type: 'pornstar'
-        },
-        {
-            pattern: /<a[^>]*class="[^"]*video-uploader__name[^"]*"[^>]*href="\/pornstars\/([^"\/]+)"[^>]*>([^<]+)<\/a>/i,
-            type: 'pornstar'
-        },
-        // Creator links
-        {
-            pattern: /<a[^>]*href="\/creators\/([^"\/]+)"[^>]*>[\s\S]*?<span[^>]*class="[^"]*name[^"]*"[^>]*>([^<]+)<\/span>/i,
-            type: 'creator'
-        },
-        // Generic uploader
-        {
-            pattern: /<a[^>]*class="[^"]*uploader[^"]*"[^>]*href="([^"]+)"[^>]*>([^<]+)<\/a>/i,
-            type: 'generic'
-        },
-        // Fallback - any user link
-        {
-            pattern: /<a[^>]*href="\/users\/([^"\/]+)"[^>]*>([^<]+)<\/a>/i,
-            type: 'user'
+    // xHamster specific pattern: <a class="video-uploader__name" href="https://xhamster.com/channels/my-pervy-family">My pervy family</a>
+    // This is the PRIORITY pattern for xHamster
+    
+    // Pattern 1: video-uploader__name class with full URL (most common on xHamster)
+    const xhUploaderPattern = /<a[^>]*class="video-uploader__name"[^>]*href="(?:https?:\/\/(?:www\.)?xhamster[0-9]*\.com)?\/?(channels|users|pornstars|creators)\/([^"\/]+)"[^>]*>([^<]+)<\/a>/i;
+    const xhMatch = html.match(xhUploaderPattern);
+    if (xhMatch && xhMatch[2] && xhMatch[3]) {
+        const type = xhMatch[1].toLowerCase();
+        const slug = xhMatch[2].trim();
+        const name = xhMatch[3].replace(/<[^>]*>/g, '').trim();
+
+        if (name.length > 0 && name.length < 100) {
+            uploader.name = name;
+            
+            if (type === 'channels' || type === 'channel') {
+                uploader.url = `xhamster://channel/${slug}`;
+            } else if (type === 'pornstars' || type === 'pornstar') {
+                uploader.url = `xhamster://profile/pornstar:${slug}`;
+            } else if (type === 'creators' || type === 'creator') {
+                uploader.url = `xhamster://profile/${slug}`;
+            } else {
+                uploader.url = `xhamster://profile/${slug}`;
+            }
+
+            // Extract avatar from video-uploader-logo with data-background-image
+            const avatarPattern = /<a[^>]*class="video-uploader-logo"[^>]*data-background-image="([^"]+)"[^>]*href="[^"]*\/(channels|users|pornstars|creators)\/[^"]*"/i;
+            const avatarMatch = html.match(avatarPattern);
+            if (avatarMatch && avatarMatch[1]) {
+                uploader.avatar = avatarMatch[1];
+            }
+
+            return uploader;
         }
+    }
+
+    // Pattern 2: Alternative order - href before class
+    const xhUploaderPattern2 = /<a[^>]*href="(?:https?:\/\/(?:www\.)?xhamster[0-9]*\.com)?\/?(channels|users|pornstars|creators)\/([^"\/]+)"[^>]*class="video-uploader__name"[^>]*>([^<]+)<\/a>/i;
+    const xhMatch2 = html.match(xhUploaderPattern2);
+    if (xhMatch2 && xhMatch2[2] && xhMatch2[3]) {
+        const type = xhMatch2[1].toLowerCase();
+        const slug = xhMatch2[2].trim();
+        const name = xhMatch2[3].replace(/<[^>]*>/g, '').trim();
+
+        if (name.length > 0 && name.length < 100) {
+            uploader.name = name;
+            
+            if (type === 'channels' || type === 'channel') {
+                uploader.url = `xhamster://channel/${slug}`;
+            } else if (type === 'pornstars' || type === 'pornstar') {
+                uploader.url = `xhamster://profile/pornstar:${slug}`;
+            } else {
+                uploader.url = `xhamster://profile/${slug}`;
+            }
+
+            // Extract avatar
+            const avatarPattern = /<a[^>]*class="video-uploader-logo"[^>]*data-background-image="([^"]+)"/i;
+            const avatarMatch = html.match(avatarPattern);
+            if (avatarMatch && avatarMatch[1]) {
+                uploader.avatar = avatarMatch[1];
+            }
+
+            return uploader;
+        }
+    }
+
+    // Pattern 3: data-role="video-uploader-link" attribute
+    const dataRolePattern = /<a[^>]*href="(?:https?:\/\/(?:www\.)?xhamster[0-9]*\.com)?\/?(channels|users|pornstars|creators)\/([^"\/]+)"[^>]*data-role="video-uploader-link"[^>]*>([^<]+)<\/a>/i;
+    const dataRoleMatch = html.match(dataRolePattern);
+    if (dataRoleMatch && dataRoleMatch[2] && dataRoleMatch[3]) {
+        const type = dataRoleMatch[1].toLowerCase();
+        const slug = dataRoleMatch[2].trim();
+        const name = dataRoleMatch[3].replace(/<[^>]*>/g, '').trim();
+
+        if (name.length > 0 && name.length < 100) {
+            uploader.name = name;
+            
+            if (type === 'channels' || type === 'channel') {
+                uploader.url = `xhamster://channel/${slug}`;
+            } else if (type === 'pornstars' || type === 'pornstar') {
+                uploader.url = `xhamster://profile/pornstar:${slug}`;
+            } else {
+                uploader.url = `xhamster://profile/${slug}`;
+            }
+
+            return uploader;
+        }
+    }
+
+    // Pattern 4: Generic channel/user/pornstar link patterns
+    const genericPatterns = [
+        { pattern: /href="(?:https?:\/\/[^"]*)?\/channels\/([^"\/]+)"[^>]*>([^<]+)<\/a>/i, type: 'channel' },
+        { pattern: /href="(?:https?:\/\/[^"]*)?\/users\/([^"\/]+)"[^>]*>([^<]+)<\/a>/i, type: 'user' },
+        { pattern: /href="(?:https?:\/\/[^"]*)?\/pornstars\/([^"\/]+)"[^>]*>([^<]+)<\/a>/i, type: 'pornstar' },
+        { pattern: /href="(?:https?:\/\/[^"]*)?\/creators\/([^"\/]+)"[^>]*>([^<]+)<\/a>/i, type: 'creator' }
     ];
 
-    for (const { pattern, type } of uploaderPatterns) {
+    for (const { pattern, type } of genericPatterns) {
         const match = html.match(pattern);
         if (match && match[1] && match[2]) {
             const slug = match[1].trim();
@@ -592,32 +679,13 @@ function extractUploaderFromContext(html) {
 
             if (name.length > 0 && name.length < 100 && !isLikelyBadUploaderName(name)) {
                 uploader.name = name;
-
-                switch (type) {
-                    case 'user':
-                        uploader.url = `xhamster://profile/${slug}`;
-                        break;
-                    case 'channel':
-                        uploader.url = `xhamster://channel/${slug}`;
-                        break;
-                    case 'pornstar':
-                        uploader.url = `xhamster://profile/pornstar:${slug}`;
-                        break;
-                    case 'creator':
-                        uploader.url = `xhamster://profile/${slug}`;
-                        break;
-                    case 'generic':
-                        uploader.url = match[1];
-                        break;
-                }
-
-                // Try to extract avatar
-                const avatarMatch = html.match(/<img[^>]*class="[^"]*(?:user-avatar|avatar)[^"]*"[^>]*(?:src|data-src)="([^"]+)"/i) ||
-                                   html.match(/<img[^>]*(?:src|data-src)="([^"]+)"[^>]*class="[^"]*(?:user-avatar|avatar)[^"]*"/i);
-                if (avatarMatch && avatarMatch[1]) {
-                    let avatar = avatarMatch[1];
-                    if (avatar.startsWith('//')) avatar = 'https:' + avatar;
-                    uploader.avatar = avatar;
+                
+                if (type === 'channel') {
+                    uploader.url = `xhamster://channel/${slug}`;
+                } else if (type === 'pornstar') {
+                    uploader.url = `xhamster://profile/pornstar:${slug}`;
+                } else {
+                    uploader.url = `xhamster://profile/${slug}`;
                 }
 
                 return uploader;
@@ -1053,52 +1121,77 @@ function parseRelatedVideos(html) {
     const relatedVideos = [];
     const seenIds = new Set();
 
-    // Look for related/recommended section
-    const relatedSectionPatterns = [
+    // xHamster specific: Look for data-block="related-recommended" section
+    const xhRelatedPatterns = [
+        /<div[^>]*data-block="related-recommended"[^>]*>([\s\S]*?)<\/div>\s*<div[^>]*class="[^"]*container/i,
+        /<div[^>]*data-role="thumb-list-block"[^>]*data-block="related-recommended"[^>]*class="[^"]*mixed-section[^"]*"[^>]*>([\s\S]*?)(?=<div[^>]*class="[^"]*container|$)/i,
+        /<div[^>]*class="[^"]*thumb-list--related[^"]*"[^>]*>([\s\S]*?)<\/div>\s*<\/div>/i,
         /<div[^>]*class="[^"]*related[^"]*"[^>]*>([\s\S]*?)<\/div>\s*<\/div>/i,
         /<section[^>]*class="[^"]*related[^"]*"[^>]*>([\s\S]*?)<\/section>/i,
         /<div[^>]*id="[^"]*related[^"]*"[^>]*>([\s\S]*?)<\/div>/i
     ];
 
-    let relatedHtml = html;
-    for (const pattern of relatedSectionPatterns) {
+    let relatedHtml = "";
+    for (const pattern of xhRelatedPatterns) {
         const match = html.match(pattern);
-        if (match && match[1]) {
+        if (match && match[1] && match[1].length > 100) {
             relatedHtml = match[1];
             break;
         }
     }
 
-    // Find all video links
-    const videoPattern = /href="([^"]*\/videos\/[^"]+)"/gi;
-    let match;
-    while ((match = videoPattern.exec(relatedHtml)) !== null && relatedVideos.length < 30) {
-        const videoUrl = match[1].startsWith('http') ? match[1] : BASE_URL + match[1];
-        const idMatch = videoUrl.match(/-(\d+)$/) || videoUrl.match(/\/videos\/([^\/-]+)/);
+    // If no specific section found, use full HTML but search from "related" keyword onward
+    if (!relatedHtml || relatedHtml.length < 100) {
+        const relatedIdx = html.toLowerCase().indexOf('related');
+        if (relatedIdx > 0) {
+            relatedHtml = html.substring(relatedIdx);
+        } else {
+            relatedHtml = html;
+        }
+    }
+
+    // Find all thumb-list__item containers in related section
+    const containerPattern = /<div[^>]*class="[^"]*thumb-list__item[^"]*video-thumb[^"]*"[^>]*>([\s\S]*?)(?=<div[^>]*class="[^"]*thumb-list__item|<\/div>\s*<\/div>\s*<div[^>]*class="[^"]*container|$)/gi;
+    let containerMatch;
+    while ((containerMatch = containerPattern.exec(relatedHtml)) !== null && relatedVideos.length < 30) {
+        const container = containerMatch[0];
+
+        // Extract video URL
+        const urlMatch = container.match(/href="([^"]*\/videos\/[^"]+)"/);
+        if (!urlMatch) continue;
+
+        const videoUrl = urlMatch[1].startsWith('http') ? urlMatch[1] : BASE_URL + urlMatch[1];
+        const idMatch = videoUrl.match(/-(\w+)$/) || videoUrl.match(/\/videos\/([^\/\?-]+)/);
         const videoId = idMatch ? idMatch[1] : generateVideoId();
 
         if (seenIds.has(videoId) || !videoId) continue;
         seenIds.add(videoId);
 
-        // Get context around the link for title extraction
-        const linkContext = relatedHtml.substring(Math.max(0, match.index - 300), Math.min(relatedHtml.length, match.index + 400));
-
+        // Extract title from title attribute or aria-label
         let title = "Unknown";
-        const titleMatch = linkContext.match(/(?:title|alt)="([^"]+)"/) ||
-                          linkContext.match(/<span[^>]*class="[^"]*title[^"]*"[^>]*>([^<]+)<\/span>/);
+        const titleMatch = container.match(/title="([^"]+)"/) ||
+                          container.match(/aria-label="([^"]+)"/) ||
+                          container.match(/<a[^>]*class="[^"]*video-thumb-info__name[^"]*"[^>]*>([^<]+)<\/a>/i);
         if (titleMatch && titleMatch[1]) {
             title = cleanVideoTitle(titleMatch[1]);
         }
 
+        // Extract thumbnail
         let thumbnail = "";
-        const thumbMatch = linkContext.match(/(?:data-src|src)="([^"]*(?:jpg|jpeg|png|webp)[^"]*)"/);
+        const thumbMatch = container.match(/(?:src|srcset)="([^"]*(?:jpg|jpeg|png|webp)[^"]*)"/);
         if (thumbMatch && thumbMatch[1]) {
-            thumbnail = thumbMatch[1];
+            thumbnail = thumbMatch[1].split(',')[0].trim().split(' ')[0];
             if (thumbnail.startsWith('//')) thumbnail = 'https:' + thumbnail;
         }
 
-        let duration = extractBestDurationSecondsFromContext(linkContext);
-        let views = extractViewCountFromContext(linkContext);
+        // Extract duration
+        let duration = extractBestDurationSecondsFromContext(container);
+
+        // Extract views
+        let views = extractViewCountFromContext(container);
+
+        // Extract uploader
+        let uploader = extractUploaderFromContext(container);
 
         relatedVideos.push({
             id: videoId,
@@ -1107,8 +1200,51 @@ function parseRelatedVideos(html) {
             duration: duration,
             views: views,
             url: videoUrl,
-            uploader: { name: "", url: "", avatar: "" }
+            uploader: uploader
         });
+    }
+
+    // Fallback: if no containers found, try simple link extraction
+    if (relatedVideos.length === 0) {
+        const videoPattern = /href="([^"]*\/videos\/[^"]+)"/gi;
+        let match;
+        while ((match = videoPattern.exec(relatedHtml)) !== null && relatedVideos.length < 30) {
+            const videoUrl = match[1].startsWith('http') ? match[1] : BASE_URL + match[1];
+            const idMatch = videoUrl.match(/-(\w+)$/) || videoUrl.match(/\/videos\/([^\/-]+)/);
+            const videoId = idMatch ? idMatch[1] : generateVideoId();
+
+            if (seenIds.has(videoId) || !videoId) continue;
+            seenIds.add(videoId);
+
+            const linkContext = relatedHtml.substring(Math.max(0, match.index - 400), Math.min(relatedHtml.length, match.index + 500));
+
+            let title = "Unknown";
+            const titleMatch = linkContext.match(/(?:title|alt|aria-label)="([^"]+)"/);
+            if (titleMatch && titleMatch[1]) {
+                title = cleanVideoTitle(titleMatch[1]);
+            }
+
+            let thumbnail = "";
+            const thumbMatch = linkContext.match(/(?:src|srcset)="([^"]*(?:jpg|jpeg|png|webp)[^"]*)"/);
+            if (thumbMatch && thumbMatch[1]) {
+                thumbnail = thumbMatch[1].split(',')[0].trim().split(' ')[0];
+                if (thumbnail.startsWith('//')) thumbnail = 'https:' + thumbnail;
+            }
+
+            let duration = extractBestDurationSecondsFromContext(linkContext);
+            let views = extractViewCountFromContext(linkContext);
+            let uploader = extractUploaderFromContext(linkContext);
+
+            relatedVideos.push({
+                id: videoId,
+                title: title,
+                thumbnail: thumbnail,
+                duration: duration,
+                views: views,
+                url: videoUrl,
+                uploader: uploader
+            });
+        }
     }
 
     return relatedVideos;
@@ -2433,4 +2569,4 @@ class XHamsterHistoryPager extends VideoPager {
     }
 }
 
-log("xHamster plugin loaded - v2");
+log("xHamster plugin loaded - v3");
